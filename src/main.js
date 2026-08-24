@@ -281,17 +281,16 @@ async function bootstrap() {
     state.loading = true; render();
     state.context = configured ? await api.context() : null;
     if (state.context) {
+      const invitation = new URLSearchParams(location.search).get("invite");
+      if (invitation) {
+        await api.acceptInvitation(invitation);
+        history.replaceState({}, "", location.pathname);
+        state.context = await api.context();
+      }
       const valid = state.context.memberships.some((item) => item.company_id === state.companyId);
       state.companyId = valid ? state.companyId : state.context.memberships[0]?.company_id;
       if (state.companyId) {
         sessionStorage.setItem("payguard_company_id", state.companyId);
-        const invitation = new URLSearchParams(location.search).get("invite");
-        if (invitation) {
-          await api.acceptInvitation(invitation);
-          history.replaceState({}, "", location.pathname);
-          state.context = await api.context();
-          state.companyId = state.context.memberships.at(-1)?.company_id || state.companyId;
-        }
         state.data = await api.workspace(state.companyId);
         await startRealtime();
       } else state.message = { text: "Аккаунт не состоит ни в одной активной компании.", error: true };
