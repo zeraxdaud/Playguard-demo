@@ -9,7 +9,7 @@ const state = {
   authMode: "login",
   context: null,
   companyId: sessionStorage.getItem("payguard_company_id"),
-  data: { clients: [], contracts: [], schedules: [], members: [] },
+  data: { clients: [], contracts: [], schedules: [], members: [], riskChecks: [] },
   view: "dashboard",
   modal: null,
   message: null
@@ -90,7 +90,7 @@ async function handleAuth(event) {
 function nav() {
   const items = [
     ["dashboard", "⌂", "Главная"], ["clients", "♙", "Клиенты"], ["contracts", "▤", "Договоры"],
-    ["payments", "₽", "Платежи"], ["team", "♧", "Команда"]
+    ["payments", "₽", "Платежи"], ["risk", "◇", "Проверка"], ["team", "♧", "Команда"]
   ];
   return `<nav class="nav">${items.map(([id, icon, label]) => `<button data-view="${id}" class="${state.view === id ? "active" : ""}"><span>${icon}</span>${label}</button>`).join("")}</nav>`;
 }
@@ -141,6 +141,24 @@ function paymentsView() {
     ${state.data.schedules.length ? `<div class="list">${state.data.schedules.map(paymentItem).join("")}</div>` : `<div class="empty">Создайте договор — здесь появится график.</div>`}`;
 }
 
+function riskLabel(level) {
+  return ({ LOW: "Низкий", MEDIUM: "Средний", HIGH: "Высокий" })[level] || level;
+}
+
+function riskView() {
+  const checks = state.data.riskChecks || [];
+  const latest = checks[0];
+  return `
+    <div class="section-head"><div><span class="eyebrow">Decision support</span><h1>Проверка риска</h1></div>${can(currentRole(), "write") ? `<button class="button" data-modal="risk">+ Проверить</button>` : ""}</div>
+    <p>Внутренний ориентировочный скоринг по заявленным данным. Это не отчёт БКИ и не автоматическое решение.</p>
+    ${latest ? `<article class="card risk-hero ${latest.level.toLowerCase()}">
+      <div><span class="eyebrow">Последняя проверка</span><h2>${esc(latest.candidate_name)}</h2><p>${esc(latest.recommendation)}</p></div>
+      <div class="risk-score"><strong>${latest.score}</strong><span>/ 100 · ${riskLabel(latest.level)} риск</span></div>
+    </article>` : ""}
+    <div class="section-head"><h2>История проверок</h2></div>
+    ${checks.length ? `<div class="list">${checks.map((check) => `<article class="list-item"><div class="main"><strong>${esc(check.candidate_name)}</strong><small>${new Date(check.created_at).toLocaleDateString("ru-RU")} · нагрузка ${Math.round(Number(check.payment_burden_ratio) * 100)}% · платёж ${formatMoney(check.estimated_monthly_payment)}</small></div><div class="amount"><b class="risk-number ${check.level.toLowerCase()}">${check.score}</b><span class="pill risk-${check.level.toLowerCase()}">${riskLabel(check.level)}</span></div></article>`).join("")}</div>` : `<div class="empty">Проверок пока нет. Создайте первую тестовую оценку.</div>`}`;
+}
+
 function teamView() {
   return `
     <span class="eyebrow">Доступ</span><h1>Команда</h1>
@@ -174,11 +192,25 @@ function modal() {
     const member = state.data.members.find((x) => x.id === state.modal.id);
     content = `<form class="form" id="role-form"><input type="hidden" name="membershipId" value="${member.id}"><label>Роль<select name="role">${["ADMIN", "MANAGER", "VIEWER"].map((r) => `<option ${r === member.role ? "selected" : ""}>${r}</option>`).join("")}</select></label><button class="button">Изменить роль</button><button class="button danger" type="button" id="remove-member">Удалить из компании</button></form>`;
   }
-  return `<div class="modal-backdrop" id="modal-backdrop"><section class="modal"><div class="modal-head"><h2>${({ client: "Новый клиент", contract: "Новый договор", payment: "Оплата", invite: "Приглашение", member: "Доступ сотрудника" })[state.modal.type]}</h2><button class="icon-button" id="close-modal">×</button></div>${content}</section></div>`;
+  if (state.modal.type === "risk") content = `
+    <form class="form" id="risk-form">
+      <label>Потенциальный клиент<input name="p_candidate_name" required placeholder="Например, Тестовый Клиент"></label>
+      <label>Связать с существующим клиентом (необязательно)<select name="p_client_id"><option value="">Не связывать</option>${state.data.clients.map((c) => `<option value="${c.id}">${esc(fullName(c))}</option>`).join("")}</select></label>
+      <label>Стоимость сделки<input name="p_requested_amount" type="number" min="1" step="0.01" required inputmode="decimal"></label>
+      <label>Первоначальный взнос<input name="p_down_payment" type="number" min="0" step="0.01" value="0" required inputmode="decimal"></label>
+      <label>Срок, месяцев<input name="p_term_months" type="number" min="1" max="60" value="6" required></label>
+      <label>Подтверждённый доход в месяц<input name="p_monthly_income" type="number" min="1" step="0.01" required inputmode="decimal"></label>
+      <label>Другие ежемесячные обязательства<input name="p_existing_monthly_obligations" type="number" min="0" step="0.01" value="0" required inputmode="decimal"></label>
+      <label>Активных рассрочек<input name="p_active_installments" type="number" min="0" max="99" value="0" required></label>
+      <label>Максимальная известная просрочка, дней<input name="p_max_overdue_days" type="number" min="0" max="3650" value="0" required></label>
+      <div class="notice">Используйте только данные, которые компания вправе обрабатывать. Score — вспомогательная оценка, решение принимает человек.</div>
+      <button class="button">Рассчитать Risk Score</button>
+    </form>`;
+  return `<div class="modal-backdrop" id="modal-backdrop"><section class="modal"><div class="modal-head"><h2>${({ client: "Новый клиент", contract: "Новый договор", payment: "Оплата", invite: "Приглашение", member: "Доступ сотрудника", risk: "Новая проверка" })[state.modal.type]}</h2><button class="icon-button" id="close-modal">×</button></div>${content}</section></div>`;
 }
 
 function appScreen() {
-  const content = ({ dashboard, clients: clientsView, contracts: contractsView, payments: paymentsView, team: teamView })[state.view]();
+  const content = ({ dashboard, clients: clientsView, contracts: contractsView, payments: paymentsView, risk: riskView, team: teamView })[state.view]();
   root.innerHTML = `<div class="shell"><header class="topbar"><div class="brand"><div class="brand-mark">P</div><div>PayGuard<small>${esc(currentCompany()?.name)}</small></div></div><button class="avatar" data-view="team">${esc((state.context.profile.full_name || state.context.profile.email || "P").slice(0, 1).toUpperCase())}</button></header><main class="content">${state.message ? `<div class="notice ${state.message.error ? "error" : ""}">${esc(state.message.text)}</div>` : ""}${content}</main>${nav()}${modal()}</div>`;
   bindAppEvents();
 }
@@ -198,6 +230,7 @@ function bindAppEvents() {
   root.querySelector("#payment-form")?.addEventListener("submit", submitPayment);
   root.querySelector("#invite-form")?.addEventListener("submit", submitInvite);
   root.querySelector("#role-form")?.addEventListener("submit", submitRole);
+  root.querySelector("#risk-form")?.addEventListener("submit", submitRisk);
   root.querySelector("#remove-member")?.addEventListener("click", removeMember);
 }
 
@@ -210,6 +243,14 @@ async function submitContract(e) { e.preventDefault(); const v = Object.fromEntr
 async function submitPayment(e) { e.preventDefault(); const v = Object.fromEntries(new FormData(e.currentTarget)); await action(() => api.recordPayment({ ...v, amount: Number(v.amount) }), "Оплата зафиксирована."); }
 async function submitInvite(e) { e.preventDefault(); const v = Object.fromEntries(new FormData(e.currentTarget)); try { const token = await api.inviteMember({ companyId: state.companyId, ...v }); const url = `${location.origin}${location.pathname}?invite=${token}`; await navigator.clipboard?.writeText(url); state.modal = null; notify(`Ссылка приглашения создана${navigator.clipboard ? " и скопирована" : ""}: ${url}`); } catch (error) { notify(error.message, true); } }
 async function submitRole(e) { e.preventDefault(); const v = Object.fromEntries(new FormData(e.currentTarget)); await action(() => api.changeRole(v), "Роль обновлена."); }
+async function submitRisk(e) {
+  e.preventDefault();
+  const v = Object.fromEntries(new FormData(e.currentTarget));
+  for (const key of ["p_requested_amount", "p_down_payment", "p_term_months", "p_monthly_income", "p_existing_monthly_obligations", "p_active_installments", "p_max_overdue_days"]) v[key] = Number(v[key]);
+  v.p_client_id = v.p_client_id || null;
+  v.p_company_id = state.companyId;
+  await action(() => api.createRiskCheck(v), "Risk Score рассчитан и сохранён для команды.");
+}
 async function removeMember() { if (!confirm("Удалить сотрудника из компании?")) return; await action(() => api.removeMember(state.modal.id), "Сотрудник удалён из компании."); }
 
 async function refresh() {
@@ -231,6 +272,7 @@ async function startRealtime() {
     .on("postgres_changes", { event: "*", schema: "public", table: "contracts", filter: `company_id=eq.${state.companyId}` }, scheduleRefresh)
     .on("postgres_changes", { event: "*", schema: "public", table: "payment_schedules", filter: `company_id=eq.${state.companyId}` }, scheduleRefresh)
     .on("postgres_changes", { event: "*", schema: "public", table: "company_members", filter: `company_id=eq.${state.companyId}` }, scheduleRefresh)
+    .on("postgres_changes", { event: "*", schema: "public", table: "risk_checks", filter: `company_id=eq.${state.companyId}` }, scheduleRefresh)
     .subscribe();
 }
 
@@ -265,5 +307,5 @@ function render() {
   return appScreen();
 }
 
-if (supabase) supabase.auth.onAuthStateChange(async (event) => { if (event === "SIGNED_OUT") { if (realtimeChannel) await supabase.removeChannel(realtimeChannel); realtimeChannel = null; state.context = null; state.data = { clients: [], contracts: [], schedules: [], members: [] }; render(); } });
+if (supabase) supabase.auth.onAuthStateChange(async (event) => { if (event === "SIGNED_OUT") { if (realtimeChannel) await supabase.removeChannel(realtimeChannel); realtimeChannel = null; state.context = null; state.data = { clients: [], contracts: [], schedules: [], members: [], riskChecks: [] }; render(); } });
 bootstrap();

@@ -60,3 +60,22 @@ export function installments({ principal, downPayment = 0, count }) {
     index === n - 1 ? Number((remainder - base * (n - 1)).toFixed(2)) : base
   );
 }
+
+export function riskLevel(score) {
+  if (score <= 34) return "LOW";
+  if (score <= 64) return "MEDIUM";
+  return "HIGH";
+}
+
+export function calculateRiskScore({ requestedAmount, downPayment = 0, termMonths, monthlyIncome, existingMonthlyObligations = 0, activeInstallments = 0, maxOverdueDays = 0 }) {
+  const monthlyPayment = (requestedAmount - downPayment) / termMonths;
+  const burden = (monthlyPayment + existingMonthlyObligations) / monthlyIncome;
+  const downRatio = downPayment / requestedAmount;
+  let score = 10;
+  score += burden >= 0.7 ? 45 : burden >= 0.5 ? 30 : burden >= 0.35 ? 18 : 5;
+  score += downRatio < 0.1 ? 15 : downRatio < 0.2 ? 8 : downRatio >= 0.35 ? -5 : 0;
+  score += maxOverdueDays >= 90 ? 30 : maxOverdueDays >= 30 ? 20 : maxOverdueDays >= 7 ? 10 : 0;
+  score += activeInstallments >= 3 ? 10 : activeInstallments >= 1 ? 4 : 0;
+  score = Math.max(0, Math.min(100, score));
+  return { score, level: riskLevel(score), monthlyPayment, burden };
+}

@@ -45,13 +45,14 @@ export const api = {
   async workspace(companyId) {
     const db = requireSupabase();
     unwrap(await db.rpc("refresh_company_overdues", { p_company_id: companyId }));
-    const [clients, contracts, schedules, members] = await Promise.all([
+    const [clients, contracts, schedules, members, riskChecks] = await Promise.all([
       db.from("clients").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
       db.from("contracts").select("*, clients(first_name,last_name)").eq("company_id", companyId).order("created_at", { ascending: false }),
       db.from("payment_schedules").select("*, contracts(contract_number, clients(first_name,last_name))").eq("company_id", companyId).order("due_date"),
-      db.from("company_members").select("id,user_id,role,status,profiles(full_name,email)").eq("company_id", companyId).order("created_at")
+      db.from("company_members").select("id,user_id,role,status,profiles(full_name,email)").eq("company_id", companyId).order("created_at"),
+      db.from("risk_checks").select("*").eq("company_id", companyId).order("created_at", { ascending: false }).limit(50)
     ]);
-    return { clients: unwrap(clients), contracts: unwrap(contracts), schedules: unwrap(schedules), members: unwrap(members) };
+    return { clients: unwrap(clients), contracts: unwrap(contracts), schedules: unwrap(schedules), members: unwrap(members), riskChecks: unwrap(riskChecks) };
   },
 
   async createClient(companyId, values) {
@@ -97,5 +98,9 @@ export const api = {
 
   async seedDemo(companyId) {
     return unwrap(await requireSupabase().rpc("seed_demo_data", { p_company_id: companyId }));
+  },
+
+  async createRiskCheck(values) {
+    return unwrap(await requireSupabase().rpc("create_risk_check", values));
   }
 };
