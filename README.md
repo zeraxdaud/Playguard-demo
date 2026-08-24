@@ -1,17 +1,123 @@
-# PayGuard v0.1 — Vercel Demo
+# PayGuard v0.2
 
-Mobile-first browser demo for testing PayGuard on iPhone.
+Mobile-first демо совместного управления рассрочками. В отличие от v0.1, данные не лежат в браузере: приложение использует Supabase Auth, общую PostgreSQL-базу и Row Level Security.
 
-## Important
-This build intentionally uses browser localStorage instead of a server/database. It is suitable only for product/UX testing with fake data. Do not enter real personal, passport, financial or customer data.
+## Что уже работает
 
-## Vercel
-Framework preset: Other
-Build command: `npm run build`
-Output directory: `dist`
+- регистрация владельца вместе с новой компанией;
+- вход через Supabase Auth и постоянная сессия;
+- несколько компаний у одного пользователя;
+- роли `OWNER`, `ADMIN`, `MANAGER`, `VIEWER`;
+- клиенты, договоры, автоматически создаваемые графики и частичные оплаты;
+- автоматическая маркировка просроченных платежей;
+- приглашение сотрудника по одноразовой ссылке на конкретный email;
+- общие данные для всех сотрудников компании;
+- автоматическое обновление открытых устройств через Supabase Realtime;
+- RLS-изоляция компаний на уровне PostgreSQL;
+- вымышленные demo-данные, которые можно добавить только в пустую компанию;
+- адаптивный интерфейс для iPhone и компьютера.
 
-## Demo login
-- owner@demo.local
-- Demo12345!
+## Права ролей
 
-All demo data is stored only in the current browser and can be reset from Settings / by clearing site data.
+| Действие | OWNER | ADMIN | MANAGER | VIEWER |
+|---|---:|---:|---:|---:|
+| Смотреть данные компании | ✅ | ✅ | ✅ | ✅ |
+| Добавлять клиентов, договоры и оплаты | ✅ | ✅ | ✅ | — |
+| Приглашать и управлять сотрудниками | ✅ | ✅ | — | — |
+| Менять компанию и владельцев | ✅ | — | — | — |
+
+Администратор не может назначать `OWNER`, менять роль владельца или удалить последнего владельца. Эти ограничения проверяет PostgreSQL, а не только интерфейс.
+
+## Запуск локально
+
+Нужен Node.js 20 или новее.
+
+```bash
+npm install
+cp .env.example .env
+npm run dev
+```
+
+Откройте `http://localhost:5173`.
+
+До создания `.env` приложение покажет понятный экран настройки, но авторизация и общая база работать не будут.
+
+## Настройка Supabase
+
+1. Создайте новый проект на Supabase.
+2. Откройте **SQL Editor**, вставьте целиком файл `supabase/migrations/202608240001_payguard_v02.sql` и нажмите **Run**. Для нового проекта это единственная миграция.
+3. Откройте **Project Settings → API** и скопируйте URL проекта и publishable/anon key.
+4. Создайте `.env` из `.env.example`:
+
+```env
+VITE_SUPABASE_URL=https://PROJECT_REF.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
+VITE_APP_URL=http://localhost:5173
+```
+
+5. В **Authentication → URL Configuration** временно задайте:
+
+```text
+Site URL: http://localhost:5173
+Redirect URLs: http://localhost:5173/**
+```
+
+6. В **Authentication → Providers → Email** выберите режим регистрации:
+   - для быстрого закрытого демо можно временно отключить подтверждение email;
+   - для публичного теста подтверждение email лучше оставить включённым.
+
+`VITE_SUPABASE_PUBLISHABLE_KEY` является публичным клиентским ключом и работает безопасно только вместе с RLS. Никогда не добавляйте `service_role` key в Vite, GitHub или Vercel.
+
+## Публикация на Vercel
+
+1. Загрузите содержимое этой папки в корень GitHub-репозитория.
+2. В Vercel выберите **Add New → Project** и импортируйте репозиторий.
+3. Framework Preset: `Vite` (обычно определяется автоматически).
+4. Build Command: `npm run build`.
+5. Output Directory: `dist`.
+6. В **Project → Settings → Environment Variables** добавьте для Production и Preview:
+
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_PUBLISHABLE_KEY
+VITE_APP_URL
+```
+
+7. Выполните Deploy. После добавления или изменения env-переменных нужен новый deployment.
+8. Скопируйте постоянный production-адрес, например `https://payguard-demo.vercel.app`.
+9. Вернитесь в Supabase **Authentication → URL Configuration**:
+
+```text
+Site URL: https://payguard-demo.vercel.app
+Redirect URLs:
+  http://localhost:5173/**
+  https://payguard-demo.vercel.app/**
+```
+
+Для preview-сборок можно отдельно добавить шаблон Vercel из официальной документации, но для production безопаснее держать точный адрес.
+
+## Первый совместный сценарий
+
+1. Владелец регистрируется и создаёт компанию.
+2. В разделе **Команда** нажимает **Пригласить**, вводит email и роль.
+3. PayGuard создаёт одноразовую ссылку со сроком 7 дней и копирует её.
+4. Сотрудник открывает ссылку и регистрируется с тем же email.
+5. После входа приглашение принимается, и компания появляется в его списке.
+6. `MANAGER` может добавлять данные и оплаты; `VIEWER` видит всё, но кнопок записи у него нет, а прямые запросы блокирует RLS.
+
+## Demo-данные
+
+В новой пустой компании откройте **Команда → Загрузить демо**. Будут созданы только вымышленные клиенты `Анна Волкова` и `Максим Орлов`, два договора и графики. Функция откажется смешивать demo с уже существующей базой.
+
+## Проверка
+
+```bash
+npm test
+npm run build
+```
+
+Автотесты проверяют матрицу ролей, расчёт рассрочки и dashboard, наличие RLS на tenant-таблицах, role checks в RPC и хеширование токенов приглашения. Полный чек-лист ручной проверки двух реальных Auth-пользователей находится в [TESTING.md](TESTING.md).
+
+## Важное ограничение
+
+Это технически защищённое demo, но не разрешение загружать реальные паспортные, финансовые или иные чувствительные персональные данные. Перед production нужны юридическая модель обработки ПДн, регион хранения, DPA, резервное копирование, MFA, мониторинг, политика удаления, security review и проверка требований применимого законодательства.
